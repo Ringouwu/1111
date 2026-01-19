@@ -1,0 +1,550 @@
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                             QTableWidget, QTableWidgetItem, QHeaderView,
+                             QGroupBox, QSpinBox, QDoubleSpinBox, QComboBox,
+                             QScrollArea, QInputDialog, QMessageBox, QDialog,
+                             QTextEdit, QDialogButtonBox)
+from PyQt5.QtCore import Qt
+import matplotlib.colors as mcolors
+import csv
+import io
+
+# 配置Matplotlib中文字体支持 - 修复中文显示问题
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
+# 设置默认字体大小
+plt.rcParams['font.size'] = 10
+
+
+class CSVDialog(QDialog):
+    """CSV数据粘贴对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("粘贴CSV数据")
+        self.setGeometry(200, 200, 600, 400)
+
+        layout = QVBoxLayout(self)
+
+        # 说明文字
+        info_label = QLabel("请在下方文本框中粘贴CSV")
+        layout.addWidget(info_label)
+
+        # 文本编辑框
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText("")
+        layout.addWidget(self.text_edit)
+
+        # 按钮框
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def get_csv_data(self):
+        """获取解析后的CSV数据"""
+        text = self.text_edit.toPlainText().strip()
+        if not text:
+            return []
+
+        try:
+            # 使用csv模块解析文本
+            csv_file = io.StringIO(text)
+            reader = csv.reader(csv_file)
+            return [row for row in reader if row]  # 过滤空行
+        except Exception as e:
+            QMessageBox.warning(self, "解析错误", f"CSV数据格式错误：{str(e)}")
+            return []
+
+
+class WriterScatter3DApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.writer_data = []
+        self.dimension_names = ['维度1', '维度2', '维度3', '维度4']
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle('三维散点图可视化工具')
+        self.setGeometry(100, 100, 1400, 800)
+
+        # 创建中央部件和主布局
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+
+        # 左侧控制面板
+        control_panel = self.create_control_panel()
+        main_layout.addWidget(control_panel, 1)
+
+        # 右侧图表区域
+        chart_panel = self.create_chart_panel()
+        main_layout.addWidget(chart_panel, 2)
+
+    def create_control_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # 表头编辑区域
+        header_group = QGroupBox("表头设置")
+        header_layout = QHBoxLayout(header_group)
+
+        edit_headers_btn = QPushButton('编辑维度名称')
+        edit_headers_btn.clicked.connect(self.edit_dimension_names)
+        header_layout.addWidget(edit_headers_btn)
+
+        edit_column_btn = QPushButton('编辑列名')
+        edit_column_btn.clicked.connect(self.edit_column_header)
+        header_layout.addWidget(edit_column_btn)
+
+        layout.addWidget(header_group)
+
+        # 数据输入区域
+        input_group = QGroupBox("数据输入")
+        input_layout = QVBoxLayout(input_group)
+
+        # 数据表格
+        self.table_widget = QTableWidget(0, 5)
+        self.table_widget.horizontalHeader().sectionDoubleClicked.connect(self.on_horizontal_header_double_clicked)
+        self.update_table_headers()
+        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        input_layout.addWidget(self.table_widget)
+
+        # 添加/删除/导入按钮
+        button_layout = QHBoxLayout()
+        add_row_btn = QPushButton('添加一行')
+        add_row_btn.clicked.connect(self.add_data_row)
+
+        add_col_btn = QPushButton('添加一列')
+        add_col_btn.clicked.connect(self.add_data_column)
+
+        del_btn = QPushButton('删除选中')
+        del_btn.clicked.connect(self.delete_selected_row)
+
+        import_csv_btn = QPushButton('导入CSV')
+        import_csv_btn.clicked.connect(self.import_csv_data)
+        import_csv_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+
+        button_layout.addWidget(add_row_btn)
+        button_layout.addWidget(add_col_btn)
+        button_layout.addWidget(del_btn)
+        button_layout.addWidget(import_csv_btn)
+        input_layout.addLayout(button_layout)
+
+        # 图表设置区域
+        settings_group = QGroupBox("图表设置")
+        settings_layout = QVBoxLayout(settings_group)
+
+        # 维度选择
+        dim_layout = QHBoxLayout()
+        dim_layout.addWidget(QLabel('X轴维度:'))
+        self.x_dim_combo = QComboBox()
+        dim_layout.addWidget(self.x_dim_combo)
+
+        dim_layout.addWidget(QLabel('Y轴维度:'))
+        self.y_dim_combo = QComboBox()
+        dim_layout.addWidget(self.y_dim_combo)
+
+        dim_layout.addWidget(QLabel('Z轴维度:'))
+        self.z_dim_combo = QComboBox()
+        dim_layout.addWidget(self.z_dim_combo)
+        settings_layout.addLayout(dim_layout)
+
+        # 新增颜色维度选择
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(QLabel('颜色维度:'))
+        self.color_dim_combo = QComboBox()
+        self.color_dim_combo.addItem('无')  # 默认无颜色维度
+        color_layout.addWidget(self.color_dim_combo)
+        settings_layout.addLayout(color_layout)
+
+        # 更新维度选择框
+        self.update_dimension_combos()
+
+        # 颜色映射选择
+        cmap_layout = QHBoxLayout()
+        cmap_layout.addWidget(QLabel('颜色映射:'))
+        self.color_combo = QComboBox()
+        self.color_combo.addItems(['viridis', 'plasma', 'inferno', 'cool', 'hot', 'rainbow'])
+        cmap_layout.addWidget(self.color_combo)
+        settings_layout.addLayout(cmap_layout)
+
+        # 点大小设置
+        size_layout = QHBoxLayout()
+        size_layout.addWidget(QLabel('点大小:'))
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(10, 200)
+        self.size_spin.setValue(50)
+        size_layout.addWidget(self.size_spin)
+        settings_layout.addLayout(size_layout)
+
+        # 透明度设置
+        alpha_layout = QHBoxLayout()
+        alpha_layout.addWidget(QLabel('透明度:'))
+        self.alpha_spin = QDoubleSpinBox()
+        self.alpha_spin.setRange(0.1, 1.0)
+        self.alpha_spin.setValue(0.7)
+        self.alpha_spin.setSingleStep(0.1)
+        alpha_layout.addWidget(self.alpha_spin)
+        settings_layout.addLayout(alpha_layout)
+
+        # 生成图表按钮
+        generate_btn = QPushButton('生成三维散点图')
+        generate_btn.clicked.connect(self.generate_scatter_plot)
+        settings_layout.addWidget(generate_btn)
+
+        # 添加到主布局
+        layout.addWidget(input_group)
+        layout.addWidget(settings_group)
+        layout.addStretch()
+
+        return panel
+
+    def create_chart_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # 创建Matplotlib图形
+        self.figure = Figure(figsize=(10, 8), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
+
+        return panel
+
+    def import_csv_data(self):
+        """导入CSV数据到表格"""
+        dialog = CSVDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            csv_data = dialog.get_csv_data()
+            if not csv_data:
+                return
+
+            self.fill_table_with_csv(csv_data)
+
+    def fill_table_with_csv(self, csv_data):
+        """用CSV数据填充表格"""
+        if not csv_data:
+            return
+
+        try:
+            # 清空现有表格
+            self.table_widget.setRowCount(0)
+
+            # 处理表头（如果有）
+            if len(csv_data) > 1:
+                header_row = csv_data[0]
+                if all(isinstance(cell, str) and cell.strip() for cell in header_row):
+                    if len(header_row) > self.table_widget.columnCount():
+                        self.table_widget.setColumnCount(len(header_row))
+
+                    # 更新表头
+                    for col, header in enumerate(header_row):
+                        if col < len(self.dimension_names) + 1:
+                            header_item = QTableWidgetItem(header.strip())
+                            self.table_widget.setHorizontalHeaderItem(col, header_item)
+
+                    data_rows = csv_data[1:]
+                else:
+                    data_rows = csv_data
+            else:
+                data_rows = csv_data
+
+            # 填充数据行
+            for row_data in data_rows:
+                if not row_data:
+                    continue
+
+                row_position = self.table_widget.rowCount()
+                self.table_widget.insertRow(row_position)
+
+                for col, cell_value in enumerate(row_data):
+                    if col >= self.table_widget.columnCount():
+                        break
+                    item = QTableWidgetItem(str(cell_value).strip())
+                    self.table_widget.setItem(row_position, col, item)
+
+            QMessageBox.information(self, "导入成功", f"成功导入 {len(data_rows)} 行数据")
+            self.generate_scatter_plot()
+
+        except Exception as e:
+            QMessageBox.critical(self, "导入错误", f"导入CSV数据时发生错误：{str(e)}")
+
+    def update_table_headers(self):
+        """更新表格表头"""
+        headers = ['名称'] + self.dimension_names
+        self.table_widget.setHorizontalHeaderLabels(headers)
+
+    def update_dimension_combos(self):
+        """更新维度选择框"""
+        # 保存当前选择
+        current_x = self.x_dim_combo.currentText() if self.x_dim_combo.currentIndex() >= 0 else ""
+        current_y = self.y_dim_combo.currentText() if self.y_dim_combo.currentIndex() >= 0 else ""
+        current_z = self.z_dim_combo.currentText() if self.z_dim_combo.currentIndex() >= 0 else ""
+        current_color = self.color_dim_combo.currentText() if self.color_dim_combo.currentIndex() >= 0 else ""
+
+        # 清空并重新添加维度名称
+        for combo in [self.x_dim_combo, self.y_dim_combo, self.z_dim_combo, self.color_dim_combo]:
+            combo.clear()
+            if combo != self.color_dim_combo:
+                combo.addItems(self.dimension_names)
+            else:
+                combo.addItem('无')  # 颜色维度可选"无"
+                combo.addItems(self.dimension_names)
+
+        # 恢复之前的选择
+        if current_x and current_x in self.dimension_names:
+            self.x_dim_combo.setCurrentText(current_x)
+        else:
+            self.x_dim_combo.setCurrentIndex(-1)
+
+        if current_y and current_y in self.dimension_names:
+            self.y_dim_combo.setCurrentText(current_y)
+        else:
+            self.y_dim_combo.setCurrentIndex(-1)
+
+        if current_z and current_z in self.dimension_names:
+            self.z_dim_combo.setCurrentText(current_z)
+        else:
+            self.z_dim_combo.setCurrentIndex(-1)
+
+        if current_color and current_color in self.dimension_names:
+            self.color_dim_combo.setCurrentText(current_color)
+        else:
+            self.color_dim_combo.setCurrentText('无')
+
+    def edit_dimension_names(self):
+        """编辑维度名称"""
+        text, ok = QInputDialog.getText(self, '编辑维度名称',
+                                        '请输入维度名称（用逗号分隔，至少4个）:',
+                                        text=','.join(self.dimension_names))
+        if ok and text:
+            new_names = [name.strip() for name in text.split(',') if name.strip()]
+            if len(new_names) >= 4:
+                self.dimension_names = new_names
+                self.update_table_headers()
+                self.update_dimension_combos()
+                self.table_widget.setRowCount(0)
+                self.generate_scatter_plot()
+            else:
+                QMessageBox.warning(self, '输入错误', '请输入至少4个维度名称！')
+
+    def edit_column_header(self):
+        """编辑列名"""
+        current_column = self.table_widget.currentColumn()
+        if current_column >= 0:
+            current_header = self.table_widget.horizontalHeaderItem(current_column)
+            current_text = current_header.text() if current_header else ""
+
+            text, ok = QInputDialog.getText(self, '编辑列名',
+                                            f'请输入新的列名（列 {current_column + 1}）:',
+                                            text=current_text)
+            if ok and text:
+                header_item = QTableWidgetItem(text)
+                self.table_widget.setHorizontalHeaderItem(current_column, header_item)
+
+                if 1 <= current_column <= 4:
+                    self.dimension_names[current_column - 1] = text
+                    self.update_dimension_combos()
+
+                self.generate_scatter_plot()
+
+    def on_horizontal_header_double_clicked(self, logical_index):
+        """水平表头双击事件"""
+        self.edit_column_header()
+
+    def add_data_row(self):
+        """添加新的数据行"""
+        row_position = self.table_widget.rowCount()
+        self.table_widget.insertRow(row_position)
+
+        for i in range(5):
+            item = QTableWidgetItem("")
+            self.table_widget.setItem(row_position, i, item)
+
+    def add_data_column(self):
+        """添加新的数据列"""
+        current_col_count = self.table_widget.columnCount()
+        if current_col_count >= 10:
+            QMessageBox.warning(self, '列数限制', '已达到最大列数限制！')
+            return
+
+        self.table_widget.setColumnCount(current_col_count + 1)
+
+        new_dim_name = f'维度{current_col_count}'
+        if current_col_count - 1 < len(self.dimension_names):
+            self.dimension_names.append(new_dim_name)
+        else:
+            self.dimension_names.extend([new_dim_name] * (current_col_count - len(self.dimension_names) + 1))
+
+        self.update_table_headers()
+        self.update_dimension_combos()
+
+    def delete_selected_row(self):
+        """删除选中的行"""
+        current_row = self.table_widget.currentRow()
+        if current_row >= 0:
+            self.table_widget.removeRow(current_row)
+        else:
+            QMessageBox.information(self, '提示', '请先选择要删除的行！')
+
+    def generate_scatter_plot(self):
+        """生成三维散点图"""
+        self.figure.clear()
+
+        # 获取数据，现在包括颜色数据
+        writers, x_data, y_data, z_data, color_data = self.get_plot_data()
+
+        if not writers or not x_data:
+            ax = self.figure.add_subplot(111)
+            # 修复中文显示问题
+            ax.text(0.5, 0.5, '暂无数据或数据格式错误\n请检查表格数据和维度选择',
+                    ha='center', va='center', transform=ax.transAxes, fontsize=12,
+                    fontproperties=plt.matplotlib.font_manager.FontProperties(fname='simhei.ttf'))
+            ax.set_xticks([])
+            ax.set_yticks([])
+            self.canvas.draw()
+            return
+
+        ax = self.figure.add_subplot(111, projection='3d')
+
+        cmap_name = self.color_combo.currentText()
+        cmap = plt.get_cmap(cmap_name)
+
+        # 根据是否选择颜色维度来决定颜色映射
+        if self.color_dim_combo.currentText() != '无' and color_data:
+            # 使用选择的维度数据作为颜色值
+            color_vals = np.array(color_data)
+            # 归一化颜色值
+            norm = mcolors.Normalize(vmin=color_vals.min(), vmax=color_vals.max())
+            scatter = ax.scatter(x_data, y_data, z_data,
+                                 c=color_vals, cmap=cmap, norm=norm,
+                                 s=self.size_spin.value(),
+                                 alpha=self.alpha_spin.value(),
+                                 edgecolors='black',
+                                 linewidth=0.5)
+        else:
+            # 使用默认的颜色映射（基于数据索引）
+            color_vals = np.linspace(0, 1, len(x_data))
+            scatter = ax.scatter(x_data, y_data, z_data,
+                                 c=color_vals, cmap=cmap,
+                                 s=self.size_spin.value(),
+                                 alpha=self.alpha_spin.value(),
+                                 edgecolors='black',
+                                 linewidth=0.5)
+
+        # 设置坐标轴标签（修复中文显示）
+        x_label = self.x_dim_combo.currentText() or 'X轴'
+        y_label = self.y_dim_combo.currentText() or 'Y轴'
+        z_label = self.z_dim_combo.currentText() or 'Z轴'
+
+        ax.set_xlabel(x_label, fontsize=12, labelpad=10)
+        ax.set_ylabel(y_label, fontsize=12, labelpad=10)
+        ax.set_zlabel(z_label, fontsize=12, labelpad=10)
+
+        # 设置标题（修复中文显示）
+        color_label = self.color_dim_combo.currentText()
+        if color_label != '无':
+            title = f'三维散点图 (颜色表示: {color_label})'
+        else:
+            title = '三维散点图'
+
+        ax.set_title(title, fontsize=14, pad=20)
+
+        # 添加颜色条
+        if self.color_dim_combo.currentText() != '无' and color_data:
+            cbar = self.figure.colorbar(scatter, ax=ax, shrink=0.5, aspect=20)
+            cbar.set_label(self.color_dim_combo.currentText())
+        else:
+            cbar = self.figure.colorbar(scatter, ax=ax, shrink=0.5, aspect=20)
+            cbar.set_label('数据分布')
+
+        # 添加数据点标签
+        for i, writer in enumerate(writers):
+            ax.text(x_data[i], y_data[i], z_data[i], f' {writer}',
+                    fontsize=8, ha='left', va='bottom')
+
+        # 设置坐标轴范围
+        if len(x_data) > 0:
+            margin = 0.5
+            ax.set_xlim([min(x_data) - margin, max(x_data) + margin])
+            ax.set_ylim([min(y_data) - margin, max(y_data) + margin])
+            ax.set_zlim([min(z_data) - margin, max(z_data) + margin])
+
+        # 设置网格
+        ax.grid(True, alpha=0.3)
+
+        # 刷新画布
+        self.canvas.draw()
+
+    def get_plot_data(self):
+        """从表格中获取绘图数据，现在包括颜色数据"""
+        writers = []
+        dimension_data = [[] for _ in range(len(self.dimension_names))]
+
+        # 检查维度选择
+        if (self.x_dim_combo.currentIndex() == -1 or
+                self.y_dim_combo.currentIndex() == -1 or
+                self.z_dim_combo.currentIndex() == -1):
+            return [], [], [], [], []
+
+        for row in range(self.table_widget.rowCount()):
+            try:
+                # 获取名称
+                name_item = self.table_widget.item(row, 0)
+                if not name_item or not name_item.text().strip():
+                    continue
+                writers.append(name_item.text().strip())
+
+                # 获取各维度数值
+                for col in range(1, self.table_widget.columnCount()):
+                    if col - 1 < len(dimension_data):
+                        item = self.table_widget.item(row, col)
+                        if item and item.text().strip():
+                            dimension_data[col - 1].append(float(item.text()))
+                        else:
+                            dimension_data[col - 1].append(0.0)
+
+            except (ValueError, AttributeError) as e:
+                print(f"第{row + 1}行数据格式错误: {e}")
+                continue
+
+        if not writers:
+            return [], [], [], [], []
+
+        # 根据选择的维度映射数据
+        x_dim_index = self.x_dim_combo.currentIndex()
+        y_dim_index = self.y_dim_combo.currentIndex()
+        z_dim_index = self.z_dim_combo.currentIndex()
+        color_dim_index = self.color_dim_combo.currentIndex() - 1  # 减1是因为第一个是"无"
+
+        x_data = dimension_data[x_dim_index] if x_dim_index < len(dimension_data) else []
+        y_data = dimension_data[y_dim_index] if y_dim_index < len(dimension_data) else []
+        z_data = dimension_data[z_dim_index] if z_dim_index < len(dimension_data) else []
+
+        # 颜色数据：如果选择了颜色维度且不是"无"
+        if color_dim_index >= 0 and color_dim_index < len(dimension_data):
+            color_data = dimension_data[color_dim_index]
+        else:
+            color_data = []
+
+        return writers, x_data, y_data, z_data, color_data
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle('Fusion')
+    window = WriterScatter3DApp()
+    window.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == '__main__':
+    main()
