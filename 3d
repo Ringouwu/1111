@@ -1,0 +1,794 @@
+import sys
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                             QTableWidget, QTableWidgetItem, QHeaderView,
+                             QGroupBox, QSpinBox, QDoubleSpinBox, QComboBox,
+                             QScrollArea, QInputDialog, QMessageBox, QDialog,
+                             QTextEdit, QDialogButtonBox, QCheckBox, QSlider)
+from PyQt5.QtCore import Qt
+import matplotlib.colors as mcolors
+import csv
+import io
+import plotly.graph_objects as go
+import plotly.offline
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+import matplotlib.font_manager as fm
+import os
+
+
+# 修复中文显示问题的全局配置
+def setup_chinese_font():
+    """配置中文字体支持"""
+    # 1. 首先尝试从系统字体中查找中文字体
+    chinese_fonts = []
+    font_dirs = [
+        '/System/Library/Fonts/',  # macOS
+        '/Library/Fonts/',  # macOS
+        'C:/Windows/Fonts/',  # Windows
+        '/usr/share/fonts/',  # Linux
+        os.path.expanduser('~/Library/Fonts/'),  # macOS 用户字体
+    ]
+
+    # 常见中文字体名称
+    chinese_font_names = [
+        'SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'PingFang SC',
+        'Hiragino Sans GB', 'WenQuanYi Micro Hei', 'STHeiti', 'STKaiti',
+        'STSong', 'STFangsong', 'DejaVu Sans'
+    ]
+
+    # 查找可用的中文字体
+    available_fonts = []
+    for font_name in chinese_font_names:
+        try:
+            # 查找字体文件
+            font_path = fm.findfont(fm.FontProperties(family=font_name))
+            if font_path and os.path.exists(font_path):
+                available_fonts.append(font_name)
+                print(f"找到字体: {font_name} -> {font_path}")
+        except:
+            pass
+
+    # 设置中文字体
+    if available_fonts:
+        plt.rcParams['font.sans-serif'] = available_fonts
+        plt.rcParams['axes.unicode_minus'] = False
+        print(f"已设置中文字体: {available_fonts}")
+    else:
+        # 如果没有找到中文字体，使用默认字体
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+        print("未找到中文字体，使用默认字体")
+
+    return available_fonts
+
+
+# 初始化字体配置
+available_fonts = setup_chinese_font()
+
+
+class CSVDialog(QDialog):
+    """CSV数据粘贴对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("粘贴CSV数据")
+        self.setGeometry(200, 200, 600, 400)
+
+        layout = QVBoxLayout(self)
+
+        info_label = QLabel("请在下方文本框中粘贴CSV数据（逗号分隔）：")
+        layout.addWidget(info_label)
+
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText("例如：\n名称,维度1,维度2,维度3,维度4\n数据1,1,2,3,4\n数据2,5,6,7,8")
+        layout.addWidget(self.text_edit)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def get_csv_data(self):
+        """获取解析后的CSV数据"""
+        text = self.text_edit.toPlainText().strip()
+        if not text:
+            return []
+
+        try:
+            csv_file = io.StringIO(text)
+            reader = csv.reader(csv_file)
+            return [row for row in reader if row]
+        except Exception as e:
+            QMessageBox.warning(self, "解析错误", f"CSV数据格式错误：{str(e)}")
+            return []
+
+
+class PlotlyViewer(QDialog):
+    """Plotly交互式可视化查看器"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Plotly 3D交互式可视化")
+        self.setGeometry(200, 100, 1000, 800)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        # 创建Plotly Web视图
+        self.web_view = QWebEngineView()
+        layout.addWidget(self.web_view)
+
+        # 控制按钮
+        button_layout = QHBoxLayout()
+        self.export_btn = QPushButton("导出HTML")
+        self.export_btn.clicked.connect(self.export_html)
+        self.close_btn = QPushButton("关闭")
+        self.close_btn.clicked.connect(self.close)
+
+        button_layout.addWidget(self.export_btn)
+        button_layout.addWidget(self.close_btn)
+        button_layout.addStretch()
+
+        layout.addLayout(button_layout)
+
+    def load_plotly_figure(self, fig):
+        """加载Plotly图形"""
+        # 生成HTML内容
+        html_content = plotly.offline.plot(fig, output_type='div', include_plotlyjs='cdn')
+        full_html = f"""
+        <html>
+            <head>
+                <title>3D散点图</title>
+                <style>
+                    body {{ margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }}
+                    .plot-container {{ background: white; border-radius: 10px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+                </style>
+            </head>
+            <body>
+                <div class="plot-container">
+                    {html_content}
+                </div>
+            </body>
+        </html>
+        """
+        self.web_view.setHtml(full_html)
+
+    def export_html(self):
+        """导出为HTML文件"""
+        try:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"3d_scatter_{timestamp}.html"
+
+            # 这里可以添加文件保存对话框
+            QMessageBox.information(self, "导出成功", f"HTML文件已保存为: {filename}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出错误", f"导出失败: {str(e)}")
+
+
+class WriterScatter3DApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.writer_data = []
+        self.dimension_names = ['维度1', '维度2', '维度3', '维度4']
+        self.plotly_viewer = None
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle('data_visualization')
+        self.setGeometry(100, 100, 1600, 900)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+
+        # 左侧控制面板
+        control_panel = self.create_control_panel()
+        main_layout.addWidget(control_panel, 1)
+
+        # 右侧图表区域
+        chart_panel = self.create_chart_panel()
+        main_layout.addWidget(chart_panel, 2)
+
+    def create_control_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # 表头编辑区域
+        header_group = QGroupBox("表头设置")
+        header_layout = QHBoxLayout(header_group)
+
+        edit_headers_btn = QPushButton('编辑维度名称')
+        edit_headers_btn.clicked.connect(self.edit_dimension_names)
+        header_layout.addWidget(edit_headers_btn)
+
+        edit_column_btn = QPushButton('编辑列名')
+        edit_column_btn.clicked.connect(self.edit_column_header)
+        header_layout.addWidget(edit_column_btn)
+
+        layout.addWidget(header_group)
+
+        # 数据输入区域
+        input_group = QGroupBox("数据输入")
+        input_layout = QVBoxLayout(input_group)
+
+        self.table_widget = QTableWidget(0, 5)
+        self.table_widget.horizontalHeader().sectionDoubleClicked.connect(self.on_horizontal_header_double_clicked)
+        self.update_table_headers()
+        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        input_layout.addWidget(self.table_widget)
+
+        # 操作按钮区域
+        button_layout = QHBoxLayout()
+        add_row_btn = QPushButton('添加一行')
+        add_row_btn.clicked.connect(self.add_data_row)
+
+        add_col_btn = QPushButton('添加一列')
+        add_col_btn.clicked.connect(self.add_data_column)
+
+        del_btn = QPushButton('删除选中')
+        del_btn.clicked.connect(self.delete_selected_row)
+
+        import_csv_btn = QPushButton('导入CSV')
+        import_csv_btn.clicked.connect(self.import_csv_data)
+        import_csv_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+
+        button_layout.addWidget(add_row_btn)
+        button_layout.addWidget(add_col_btn)
+        button_layout.addWidget(del_btn)
+        button_layout.addWidget(import_csv_btn)
+        input_layout.addLayout(button_layout)
+
+        # 可视化设置区域
+        settings_group = QGroupBox("可视化设置")
+        settings_layout = QVBoxLayout(settings_group)
+
+        # 维度选择
+        dim_layout = QHBoxLayout()
+        dim_layout.addWidget(QLabel('X轴维度:'))
+        self.x_dim_combo = QComboBox()
+        dim_layout.addWidget(self.x_dim_combo)
+
+        dim_layout.addWidget(QLabel('Y轴维度:'))
+        self.y_dim_combo = QComboBox()
+        dim_layout.addWidget(self.y_dim_combo)
+
+        dim_layout.addWidget(QLabel('Z轴维度:'))
+        self.z_dim_combo = QComboBox()
+        dim_layout.addWidget(self.z_dim_combo)
+        settings_layout.addLayout(dim_layout)
+
+        # 颜色维度选择
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(QLabel('颜色维度:'))
+        self.color_dim_combo = QComboBox()
+        self.color_dim_combo.addItem('无')
+        color_layout.addWidget(self.color_dim_combo)
+        settings_layout.addLayout(color_layout)
+
+        # 更新维度选择框
+        self.update_dimension_combos()
+
+        # 新增Plotly专属设置
+        plotly_group = QGroupBox("Plotly高级设置")
+        plotly_layout = QVBoxLayout(plotly_group)
+
+        # 点形状选择
+        shape_layout = QHBoxLayout()
+        shape_layout.addWidget(QLabel('点形状:'))
+        self.shape_combo = QComboBox()
+        self.shape_combo.addItems(['圆形', '方形', '菱形', '三角形', '星形'])
+        shape_layout.addWidget(self.shape_combo)
+        plotly_layout.addLayout(shape_layout)
+
+        # 颜色方案选择
+        cmap_layout = QHBoxLayout()
+        cmap_layout.addWidget(QLabel('颜色方案:'))
+        self.cmap_combo = QComboBox()
+        self.cmap_combo.addItems(['Plasma', 'Viridis', 'Inferno', 'Rainbow', 'Hot', 'Cool', 'Jet'])
+        cmap_layout.addWidget(self.cmap_combo)
+        plotly_layout.addLayout(cmap_layout)
+
+        # 显示选项
+        display_layout = QHBoxLayout()
+        self.show_labels_check = QCheckBox('显示数据标签')
+        self.show_labels_check.setChecked(True)
+        self.show_grid_check = QCheckBox('显示网格')
+        self.show_grid_check.setChecked(True)
+        display_layout.addWidget(self.show_labels_check)
+        display_layout.addWidget(self.show_grid_check)
+        plotly_layout.addLayout(display_layout)
+
+        settings_layout.addWidget(plotly_group)
+
+        # 点大小设置
+        size_layout = QHBoxLayout()
+        size_layout.addWidget(QLabel('点大小:'))
+        self.size_spin = QSpinBox()
+        self.size_spin.setRange(5, 50)
+        self.size_spin.setValue(10)
+        size_layout.addWidget(self.size_spin)
+        settings_layout.addLayout(size_layout)
+
+        # 透明度设置
+        alpha_layout = QHBoxLayout()
+        alpha_layout.addWidget(QLabel('透明度:'))
+        self.alpha_spin = QDoubleSpinBox()
+        self.alpha_spin.setRange(0.1, 1.0)
+        self.alpha_spin.setValue(0.8)
+        self.alpha_spin.setSingleStep(0.1)
+        alpha_layout.addWidget(self.alpha_spin)
+        settings_layout.addLayout(alpha_layout)
+
+        # 生成图表按钮
+        button_layout = QHBoxLayout()
+        generate_matplotlib_btn = QPushButton('Matplotlib图表')
+        generate_matplotlib_btn.clicked.connect(self.generate_scatter_plot)
+
+        generate_plotly_btn = QPushButton('Plotly交互图表')
+        generate_plotly_btn.setStyleSheet("QPushButton { background-color: #FF6B6B; color: white; font-weight: bold; }")
+        generate_plotly_btn.clicked.connect(self.generate_plotly_plot)
+
+        button_layout.addWidget(generate_matplotlib_btn)
+        button_layout.addWidget(generate_plotly_btn)
+        settings_layout.addLayout(button_layout)
+
+        # 添加到主布局
+        layout.addWidget(input_group)
+        layout.addWidget(settings_group)
+        layout.addStretch()
+
+        return panel
+
+    def create_chart_panel(self):
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+
+        # 创建Matplotlib图形
+        self.figure = Figure(figsize=(10, 8), dpi=100)
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas)
+
+        return panel
+
+    def generate_plotly_plot(self):
+        """生成Plotly交互式3D散点图"""
+        writers, x_data, y_data, z_data, color_data = self.get_plot_data()
+
+        if not writers or not x_data:
+            QMessageBox.warning(self, "数据错误", "请检查数据输入和维度选择！")
+            return
+
+        try:
+            # 创建Plotly图形
+            fig = go.Figure()
+
+            # 颜色映射设置
+            color_scale = self.get_plotly_colorscale()
+            symbol = self.get_plotly_symbol()
+
+            # 添加散点图轨迹
+            scatter_trace = go.Scatter3d(
+                x=x_data,
+                y=y_data,
+                z=z_data,
+                mode='markers+text' if self.show_labels_check.isChecked() else 'markers',
+                text=writers if self.show_labels_check.isChecked() else None,
+                textposition="top center",
+                marker=dict(
+                    size=self.size_spin.value(),
+                    color=color_data if color_data else np.arange(len(x_data)),
+                    colorscale=color_scale,
+                    opacity=self.alpha_spin.value(),
+                    symbol=symbol,
+                    line=dict(width=2, color='darkblue')
+                ),
+                name='数据点',
+                hovertemplate=(
+                        "<b>%{text}</b><br><br>" +
+                        f"{self.x_dim_combo.currentText()}: %{{x}}<br>" +
+                        f"{self.y_dim_combo.currentText()}: %{{y}}<br>" +
+                        f"{self.z_dim_combo.currentText()}: %{{z}}<br>" +
+                        "<extra></extra>"
+                )
+            )
+
+            fig.add_trace(scatter_trace)
+
+            # 修正后的布局设置 - 关键修改部分
+            scene_config = dict(
+                xaxis_title=self.x_dim_combo.currentText(),
+                yaxis_title=self.y_dim_combo.currentText(),
+                zaxis_title=self.z_dim_combo.currentText(),
+                bgcolor='rgb(240, 240, 240)'
+            )
+
+            # 正确设置网格线属性
+            if self.show_grid_check.isChecked():
+                scene_config.update({
+                    'xaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1),
+                    'yaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1),
+                    'zaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1)
+                })
+            else:
+                scene_config.update({
+                    'xaxis': dict(showgrid=False),
+                    'yaxis': dict(showgrid=False),
+                    'zaxis': dict(showgrid=False)
+                })
+
+            fig.update_layout(
+                title=dict(
+                    text=f'3D散点图 - {self.x_dim_combo.currentText()} vs {self.y_dim_combo.currentText()} vs {self.z_dim_combo.currentText()}',
+                    x=0.5,
+                    font=dict(size=20, color='darkblue')
+                ),
+                scene=scene_config,
+                width=1000,
+                height=800,
+                showlegend=True
+            )
+
+            # 显示Plotly查看器
+            if not self.plotly_viewer:
+                self.plotly_viewer = PlotlyViewer(self)
+            self.plotly_viewer.load_plotly_figure(fig)
+            self.plotly_viewer.show()
+
+        except Exception as e:
+            QMessageBox.critical(self, "生成错误", f"生成Plotly图表时发生错误：{str(e)}")
+
+    def get_plotly_colorscale(self):
+        """获取Plotly颜色映射"""
+        color_schemes = {
+            'Plasma': 'plasma',
+            'Viridis': 'viridis',
+            'Inferno': 'inferno',
+            'Rainbow': 'rainbow',
+            'Hot': 'hot',
+            'Cool': 'cool',
+            'Jet': 'jet'
+        }
+        return color_schemes.get(self.cmap_combo.currentText(), 'plasma')
+
+    def get_plotly_symbol(self):
+        """获取Plotly点形状"""
+        symbols = {
+            '圆形': 'circle',
+            '方形': 'square',
+            '菱形': 'diamond',
+            '三角形': 'triangle-up',
+            '星形': 'star'
+        }
+        return symbols.get(self.shape_combo.currentText(), 'circle')
+
+    def generate_scatter_plot(self):
+        """生成Matplotlib三维散点图 - 修复中文显示问题"""
+        # 清空图形
+        self.figure.clear()
+
+        # 获取数据
+        writers, x_data, y_data, z_data, color_data = self.get_plot_data()
+
+        if not writers or not x_data:
+            # 显示空图表提示
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, '暂无数据或数据格式错误\n请检查表格数据和维度选择',
+                    ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            self.canvas.draw()
+            return
+
+        # 创建3D子图
+        ax = self.figure.add_subplot(111, projection='3d')
+
+        # 获取颜色映射
+        cmap_name = self.cmap_combo.currentText().lower()
+        cmap = plt.get_cmap(cmap_name)
+
+        # 归一化颜色值
+        if color_data:
+            color_vals = np.array(color_data)
+            norm = mcolors.Normalize(vmin=color_vals.min(), vmax=color_vals.max())
+        else:
+            color_vals = np.linspace(0, 1, len(x_data))
+            norm = None
+
+        # 绘制散点图
+        scatter = ax.scatter(x_data, y_data, z_data,
+                             c=color_vals, cmap=cmap, norm=norm,
+                             s=self.size_spin.value() * 10,
+                             alpha=self.alpha_spin.value(),
+                             edgecolors='black',
+                             linewidth=0.5)
+
+        # 设置坐标轴标签
+        x_label = self.x_dim_combo.currentText() or 'X轴'
+        y_label = self.y_dim_combo.currentText() or 'Y轴'
+        z_label = self.z_dim_combo.currentText() or 'Z轴'
+
+        # 确保使用中文字体
+        if available_fonts:
+            # 如果有中文字体，使用第一个
+            font_name = available_fonts[0]
+        else:
+            font_name = 'DejaVu Sans'
+
+        # 设置标签
+        ax.set_xlabel(x_label, fontsize=12, labelpad=10, fontname=font_name)
+        ax.set_ylabel(y_label, fontsize=12, labelpad=10, fontname=font_name)
+        ax.set_zlabel(z_label, fontsize=12, labelpad=10, fontname=font_name)
+
+        # 设置标题
+        if color_data and self.color_dim_combo.currentText() != '无':
+            title_text = f'三维散点图 (颜色: {self.color_dim_combo.currentText()})'
+        else:
+            title_text = '三维散点图'
+
+        ax.set_title(title_text, fontsize=14, pad=20, fontname=font_name)
+
+        # 添加颜色条
+        cbar = self.figure.colorbar(scatter, ax=ax, shrink=0.5, aspect=20)
+        if color_data and self.color_dim_combo.currentText() != '无':
+            cbar_label = self.color_dim_combo.currentText()
+        else:
+            cbar_label = '数据分布'
+
+        # 设置颜色条标签
+        cbar.set_label(cbar_label, fontsize=10, fontname=font_name)
+
+        # 添加数据点标签
+        if self.show_labels_check.isChecked():
+            for i, writer in enumerate(writers):
+                # 创建带背景的标签
+                bbox_props = dict(
+                    boxstyle="round,pad=0.3",
+                    facecolor="white",
+                    edgecolor="black",
+                    alpha=0.8,
+                    linewidth=0.5
+                )
+
+                # 添加标签
+                ax.text(x_data[i], y_data[i], z_data[i], f' {writer}',
+                        fontsize=8,
+                        ha='left',
+                        va='bottom',
+                        bbox=bbox_props,
+                        fontname=font_name)
+
+        # 设置坐标轴范围
+        if len(x_data) > 0:
+            margin = 0.5
+            ax.set_xlim([min(x_data) - margin, max(x_data) + margin])
+            ax.set_ylim([min(y_data) - margin, max(y_data) + margin])
+            ax.set_zlim([min(z_data) - margin, max(z_data) + margin])
+
+        # 设置网格
+        if self.show_grid_check.isChecked():
+            ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+        else:
+            ax.grid(False)
+
+        # 美化3D坐标系
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor('w')
+        ax.yaxis.pane.set_edgecolor('w')
+        ax.zaxis.pane.set_edgecolor('w')
+
+        # 设置视角
+        ax.view_init(elev=20, azim=45)
+
+        # 设置紧凑布局
+        self.figure.tight_layout()
+
+        # 刷新画布
+        self.canvas.draw()
+
+    def import_csv_data(self):
+        """导入CSV数据到表格"""
+        dialog = CSVDialog(self)
+        if dialog.exec_() == QDialog.Accepted:
+            csv_data = dialog.get_csv_data()
+            if csv_data:
+                self.fill_table_with_csv(csv_data)
+
+    def fill_table_with_csv(self, csv_data):
+        """用CSV数据填充表格"""
+        try:
+            self.table_widget.setRowCount(0)
+            if len(csv_data) > 1:
+                header_row = csv_data[0]
+                if all(isinstance(cell, str) and cell.strip() for cell in header_row):
+                    if len(header_row) > self.table_widget.columnCount():
+                        self.table_widget.setColumnCount(len(header_row))
+                    for col, header in enumerate(header_row):
+                        if col < len(self.dimension_names) + 1:
+                            header_item = QTableWidgetItem(header.strip())
+                            self.table_widget.setHorizontalHeaderItem(col, header_item)
+                    data_rows = csv_data[1:]
+                else:
+                    data_rows = csv_data
+            else:
+                data_rows = csv_data
+
+            for row_data in data_rows:
+                if not row_data:
+                    continue
+                row_position = self.table_widget.rowCount()
+                self.table_widget.insertRow(row_position)
+                for col, cell_value in enumerate(row_data):
+                    if col >= self.table_widget.columnCount():
+                        break
+                    item = QTableWidgetItem(str(cell_value).strip())
+                    self.table_widget.setItem(row_position, col, item)
+
+            QMessageBox.information(self, "导入成功", f"成功导入 {len(data_rows)} 行数据")
+            self.generate_scatter_plot()
+
+        except Exception as e:
+            QMessageBox.critical(self, "导入错误", f"导入CSV数据时发生错误：{str(e)}")
+
+    def update_table_headers(self):
+        """更新表格表头"""
+        headers = ['名称'] + self.dimension_names
+        self.table_widget.setHorizontalHeaderLabels(headers)
+
+    def update_dimension_combos(self):
+        """更新维度选择框"""
+        for combo in [self.x_dim_combo, self.y_dim_combo, self.z_dim_combo, self.color_dim_combo]:
+            combo.clear()
+            if combo != self.color_dim_combo:
+                combo.addItems(self.dimension_names)
+            else:
+                combo.addItem('无')
+                combo.addItems(self.dimension_names)
+
+        self.x_dim_combo.setCurrentIndex(-1)
+        self.y_dim_combo.setCurrentIndex(-1)
+        self.z_dim_combo.setCurrentIndex(-1)
+        self.color_dim_combo.setCurrentText('无')
+
+    def edit_dimension_names(self):
+        """编辑维度名称"""
+        text, ok = QInputDialog.getText(self, '编辑维度名称',
+                                        '请输入维度名称（用逗号分隔，至少4个）:',
+                                        text=','.join(self.dimension_names))
+        if ok and text:
+            new_names = [name.strip() for name in text.split(',') if name.strip()]
+            if len(new_names) >= 4:
+                self.dimension_names = new_names
+                self.update_table_headers()
+                self.update_dimension_combos()
+                self.table_widget.setRowCount(0)
+                self.generate_scatter_plot()
+            else:
+                QMessageBox.warning(self, '输入错误', '请输入至少4个维度名称！')
+
+    def edit_column_header(self):
+        """编辑列名"""
+        current_column = self.table_widget.currentColumn()
+        if current_column >= 0:
+            current_header = self.table_widget.horizontalHeaderItem(current_column)
+            current_text = current_header.text() if current_header else ""
+
+            text, ok = QInputDialog.getText(self, '编辑列名',
+                                            f'请输入新的列名（列 {current_column + 1}）:',
+                                            text=current_text)
+            if ok and text:
+                header_item = QTableWidgetItem(text)
+                self.table_widget.setHorizontalHeaderItem(current_column, header_item)
+
+                if 1 <= current_column <= 4:
+                    self.dimension_names[current_column - 1] = text
+                    self.update_dimension_combos()
+
+                self.generate_scatter_plot()
+
+    def on_horizontal_header_double_clicked(self, logical_index):
+        """水平表头双击事件"""
+        self.edit_column_header()
+
+    def add_data_row(self):
+        """添加新的数据行"""
+        row_position = self.table_widget.rowCount()
+        self.table_widget.insertRow(row_position)
+        for i in range(5):
+            item = QTableWidgetItem("")
+            self.table_widget.setItem(row_position, i, item)
+
+    def add_data_column(self):
+        """添加新的数据列"""
+        current_col_count = self.table_widget.columnCount()
+        if current_col_count >= 10:
+            QMessageBox.warning(self, '列数限制', '已达到最大列数限制！')
+            return
+
+        self.table_widget.setColumnCount(current_col_count + 1)
+        new_dim_name = f'维度{current_col_count}'
+        if current_col_count - 1 < len(self.dimension_names):
+            self.dimension_names.append(new_dim_name)
+        else:
+            self.dimension_names.extend([new_dim_name] * (current_col_count - len(self.dimension_names) + 1))
+
+        self.update_table_headers()
+        self.update_dimension_combos()
+
+    def delete_selected_row(self):
+        """删除选中的行"""
+        current_row = self.table_widget.currentRow()
+        if current_row >= 0:
+            self.table_widget.removeRow(current_row)
+        else:
+            QMessageBox.information(self, '提示', '请先选择要删除的行！')
+
+    def get_plot_data(self):
+        """从表格中获取绘图数据"""
+        writers = []
+        dimension_data = [[] for _ in range(len(self.dimension_names))]
+
+        if (self.x_dim_combo.currentIndex() == -1 or
+                self.y_dim_combo.currentIndex() == -1 or
+                self.z_dim_combo.currentIndex() == -1):
+            return [], [], [], [], []
+
+        for row in range(self.table_widget.rowCount()):
+            try:
+                name_item = self.table_widget.item(row, 0)
+                if not name_item or not name_item.text().strip():
+                    continue
+                writers.append(name_item.text().strip())
+
+                for col in range(1, self.table_widget.columnCount()):
+                    if col - 1 < len(dimension_data):
+                        item = self.table_widget.item(row, col)
+                        if item and item.text().strip():
+                            dimension_data[col - 1].append(float(item.text()))
+                        else:
+                            dimension_data[col - 1].append(0.0)
+
+            except (ValueError, AttributeError) as e:
+                print(f"第{row + 1}行数据格式错误: {e}")
+                continue
+
+        if not writers:
+            return [], [], [], [], []
+
+        x_dim_index = self.x_dim_combo.currentIndex()
+        y_dim_index = self.y_dim_combo.currentIndex()
+        z_dim_index = self.z_dim_combo.currentIndex()
+        color_dim_index = self.color_dim_combo.currentIndex() - 1
+
+        x_data = dimension_data[x_dim_index] if x_dim_index < len(dimension_data) else []
+        y_data = dimension_data[y_dim_index] if y_dim_index < len(dimension_data) else []
+        z_data = dimension_data[z_dim_index] if z_dim_index < len(dimension_data) else []
+
+        if color_dim_index >= 0 and color_dim_index < len(dimension_data):
+            color_data = dimension_data[color_dim_index]
+        else:
+            color_data = []
+
+        return writers, x_data, y_data, z_data, color_data
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle('Fusion')
+    window = WriterScatter3DApp()
+    window.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == '__main__':
+    main()
