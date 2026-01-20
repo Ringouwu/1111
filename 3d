@@ -313,8 +313,8 @@ class WriterScatter3DApp(QMainWindow):
         size_layout = QHBoxLayout()
         size_layout.addWidget(QLabel('点大小:'))
         self.size_spin = QSpinBox()
-        self.size_spin.setRange(5, 50)
-        self.size_spin.setValue(10)
+        self.size_spin.setRange(5, 100)
+        self.size_spin.setValue(50)
         size_layout.addWidget(self.size_spin)
         settings_layout.addLayout(size_layout)
 
@@ -359,119 +359,12 @@ class WriterScatter3DApp(QMainWindow):
 
         return panel
 
-    def generate_plotly_plot(self):
-        """生成Plotly交互式3D散点图"""
-        writers, x_data, y_data, z_data, color_data = self.get_plot_data()
-
-        if not writers or not x_data:
-            QMessageBox.warning(self, "数据错误", "请检查数据输入和维度选择！")
-            return
-
-        try:
-            # 创建Plotly图形
-            fig = go.Figure()
-
-            # 颜色映射设置
-            color_scale = self.get_plotly_colorscale()
-            symbol = self.get_plotly_symbol()
-
-            # 添加散点图轨迹
-            scatter_trace = go.Scatter3d(
-                x=x_data,
-                y=y_data,
-                z=z_data,
-                mode='markers+text' if self.show_labels_check.isChecked() else 'markers',
-                text=writers if self.show_labels_check.isChecked() else None,
-                textposition="top center",
-                marker=dict(
-                    size=self.size_spin.value(),
-                    color=color_data if color_data else np.arange(len(x_data)),
-                    colorscale=color_scale,
-                    opacity=self.alpha_spin.value(),
-                    symbol=symbol,
-                    line=dict(width=2, color='darkblue')
-                ),
-                name='数据点',
-                hovertemplate=(
-                        "<b>%{text}</b><br><br>" +
-                        f"{self.x_dim_combo.currentText()}: %{{x}}<br>" +
-                        f"{self.y_dim_combo.currentText()}: %{{y}}<br>" +
-                        f"{self.z_dim_combo.currentText()}: %{{z}}<br>" +
-                        "<extra></extra>"
-                )
-            )
-
-            fig.add_trace(scatter_trace)
-
-            # 修正后的布局设置 - 关键修改部分
-            scene_config = dict(
-                xaxis_title=self.x_dim_combo.currentText(),
-                yaxis_title=self.y_dim_combo.currentText(),
-                zaxis_title=self.z_dim_combo.currentText(),
-                bgcolor='rgb(240, 240, 240)'
-            )
-
-            # 正确设置网格线属性
-            if self.show_grid_check.isChecked():
-                scene_config.update({
-                    'xaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1),
-                    'yaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1),
-                    'zaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1)
-                })
-            else:
-                scene_config.update({
-                    'xaxis': dict(showgrid=False),
-                    'yaxis': dict(showgrid=False),
-                    'zaxis': dict(showgrid=False)
-                })
-
-            fig.update_layout(
-                title=dict(
-                    text=f'3D散点图 - {self.x_dim_combo.currentText()} vs {self.y_dim_combo.currentText()} vs {self.z_dim_combo.currentText()}',
-                    x=0.5,
-                    font=dict(size=20, color='darkblue')
-                ),
-                scene=scene_config,
-                width=1000,
-                height=800,
-                showlegend=True
-            )
-
-            # 显示Plotly查看器
-            if not self.plotly_viewer:
-                self.plotly_viewer = PlotlyViewer(self)
-            self.plotly_viewer.load_plotly_figure(fig)
-            self.plotly_viewer.show()
-
-        except Exception as e:
-            QMessageBox.critical(self, "生成错误", f"生成Plotly图表时发生错误：{str(e)}")
-
-    def get_plotly_colorscale(self):
-        """获取Plotly颜色映射"""
-        color_schemes = {
-            'Plasma': 'plasma',
-            'Viridis': 'viridis',
-            'Inferno': 'inferno',
-            'Rainbow': 'rainbow',
-            'Hot': 'hot',
-            'Cool': 'cool',
-            'Jet': 'jet'
-        }
-        return color_schemes.get(self.cmap_combo.currentText(), 'plasma')
-
-    def get_plotly_symbol(self):
-        """获取Plotly点形状"""
-        symbols = {
-            '圆形': 'circle',
-            '方形': 'square',
-            '菱形': 'diamond',
-            '三角形': 'triangle-up',
-            '星形': 'star'
-        }
-        return symbols.get(self.shape_combo.currentText(), 'circle')
-
     def generate_scatter_plot(self):
         """生成Matplotlib三维散点图 - 修复中文显示问题"""
+        # 方法一：在函数开头添加字体配置
+        plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS', 'DejaVu Sans']
+        plt.rcParams['axes.unicode_minus'] = False
+
         # 清空图形
         self.figure.clear()
 
@@ -596,6 +489,117 @@ class WriterScatter3DApp(QMainWindow):
         # 刷新画布
         self.canvas.draw()
 
+    def generate_plotly_plot(self):
+        """生成Plotly交互式3D散点图"""
+        writers, x_data, y_data, z_data, color_data = self.get_plot_data()
+
+        if not writers or not x_data:
+            QMessageBox.warning(self, "数据错误", "请检查数据输入和维度选择！")
+            return
+
+        try:
+            # 创建Plotly图形
+            fig = go.Figure()
+
+            # 颜色映射设置
+            color_scale = self.get_plotly_colorscale()
+            symbol = self.get_plotly_symbol()
+
+            # 添加散点图轨迹
+            scatter_trace = go.Scatter3d(
+                x=x_data,
+                y=y_data,
+                z=z_data,
+                mode='markers+text' if self.show_labels_check.isChecked() else 'markers',
+                text=writers if self.show_labels_check.isChecked() else None,
+                textposition="top center",
+                marker=dict(
+                    size=self.size_spin.value(),
+                    color=color_data if color_data else np.arange(len(x_data)),
+                    colorscale=color_scale,
+                    opacity=self.alpha_spin.value(),
+                    symbol=symbol,
+                    line=dict(width=2, color='darkblue')
+                ),
+                name='数据点',
+                hovertemplate=(
+                        "<b>%{text}</b><br><br>" +
+                        f"{self.x_dim_combo.currentText()}: %{{x}}<br>" +
+                        f"{self.y_dim_combo.currentText()}: %{{y}}<br>" +
+                        f"{self.z_dim_combo.currentText()}: %{{z}}<br>" +
+                        "<extra></extra>"
+                )
+            )
+
+            fig.add_trace(scatter_trace)
+
+            # 修正后的布局设置 - 关键修改部分
+            scene_config = dict(
+                xaxis_title=self.x_dim_combo.currentText(),
+                yaxis_title=self.y_dim_combo.currentText(),
+                zaxis_title=self.z_dim_combo.currentText(),
+                bgcolor='rgb(240, 240, 240)'
+            )
+
+            # 正确设置网格线属性
+            if self.show_grid_check.isChecked():
+                scene_config.update({
+                    'xaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1),
+                    'yaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1),
+                    'zaxis': dict(showgrid=True, gridcolor='lightgray', gridwidth=1)
+                })
+            else:
+                scene_config.update({
+                    'xaxis': dict(showgrid=False),
+                    'yaxis': dict(showgrid=False),
+                    'zaxis': dict(showgrid=False)
+                })
+
+            fig.update_layout(
+                title=dict(
+                    text=f'3D散点图 - {self.x_dim_combo.currentText()} vs {self.y_dim_combo.currentText()} vs {self.z_dim_combo.currentText()}',
+                    x=0.5,
+                    font=dict(size=20, color='darkblue')
+                ),
+                scene=scene_config,
+                width=1000,
+                height=800,
+                showlegend=True
+            )
+
+            # 显示Plotly查看器
+            if not self.plotly_viewer:
+                self.plotly_viewer = PlotlyViewer(self)
+            self.plotly_viewer.load_plotly_figure(fig)
+            self.plotly_viewer.show()
+
+        except Exception as e:
+            QMessageBox.critical(self, "生成错误", f"生成Plotly图表时发生错误：{str(e)}")
+
+    def get_plotly_colorscale(self):
+        """获取Plotly颜色映射"""
+        color_schemes = {
+            'Plasma': 'plasma',
+            'Viridis': 'viridis',
+            'Inferno': 'inferno',
+            'Rainbow': 'rainbow',
+            'Hot': 'hot',
+            'Cool': 'cool',
+            'Jet': 'jet'
+        }
+        return color_schemes.get(self.cmap_combo.currentText(), 'plasma')
+
+    def get_plotly_symbol(self):
+        """获取Plotly点形状"""
+        symbols = {
+            '圆形': 'circle',
+            '方形': 'square',
+            '菱形': 'diamond',
+            '三角形': 'triangle-up',
+            '星形': 'star'
+        }
+        return symbols.get(self.shape_combo.currentText(), 'circle')
+
     def import_csv_data(self):
         """导入CSV数据到表格"""
         dialog = CSVDialog(self)
@@ -655,10 +659,25 @@ class WriterScatter3DApp(QMainWindow):
                 combo.addItem('无')
                 combo.addItems(self.dimension_names)
 
-        self.x_dim_combo.setCurrentIndex(-1)
-        self.y_dim_combo.setCurrentIndex(-1)
-        self.z_dim_combo.setCurrentIndex(-1)
-        self.color_dim_combo.setCurrentText('无')
+        # 设置默认选择
+        # X轴维度默认选择第一个（维度1）
+        if self.x_dim_combo.count() > 0:
+            self.x_dim_combo.setCurrentIndex(0)  # 维度1
+
+        # Y轴维度默认选择第二个（维度2）
+        if self.y_dim_combo.count() > 1:
+            self.y_dim_combo.setCurrentIndex(1)  # 维度2
+
+        # Z轴维度默认选择第三个（维度3）
+        if self.z_dim_combo.count() > 2:
+            self.z_dim_combo.setCurrentIndex(2)  # 维度3
+
+        # 颜色维度默认选择第五个（维度4），因为第一个是'无'
+        if self.color_dim_combo.count() > 4:
+            self.color_dim_combo.setCurrentIndex(4)  # 维度4
+        elif self.color_dim_combo.count() > 1:
+            # 如果维度数量不够4个，则选择最后一个
+            self.color_dim_combo.setCurrentIndex(self.color_dim_combo.count() - 1)
 
     def edit_dimension_names(self):
         """编辑维度名称"""
