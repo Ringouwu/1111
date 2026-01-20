@@ -71,23 +71,20 @@ available_fonts = setup_chinese_font()
 
 
 class CSVDialog(QDialog):
-    """CSV数据粘贴对话框"""
+    """CSV"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle("粘贴CSV数据")
+        self.setWindowTitle("粘贴CSV")
         self.setGeometry(200, 200, 600, 400)
 
         layout = QVBoxLayout(self)
 
-        info_label = QLabel("请在下方文本框中粘贴CSV数据（逗号分隔）：")
-        layout.addWidget(info_label)
-
         self.text_edit = QTextEdit()
-        self.text_edit.setPlaceholderText("例如：\n名称,维度1,维度2,维度3,维度4\n数据1,1,2,3,4\n数据2,5,6,7,8")
+        self.text_edit.setPlaceholderText("")
         layout.addWidget(self.text_edit)
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
